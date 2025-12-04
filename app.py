@@ -160,21 +160,43 @@ def compute_room_status(cfg: dict, families: list[Family]) -> tuple[list[str], d
     """Calcule les informations d'occupation des chambres à partir de la configuration.
 
     Retourne ``(free_rooms, room_data)`` où ``free_rooms`` est la liste triée des
-    chambres libres et ``room_data`` une table ``{room: {occupied, family, family_id}}``.
+    chambres libres et ``room_data`` une table ``{room: {occupied, family, family_id, ...}}``.
     """
 
     all_rooms = set(generate_rooms(cfg))
     occupied_rooms: set[str] = set()
-    room_data = {r: {"occupied": False, "family": None, "family_id": None} for r in all_rooms}
+    room_data = {
+        r: {
+            "occupied": False,
+            "family": None,
+            "family_id": None,
+            "arrival_date": None,
+            "persons": [],
+            "persons_count": 0,
+            "phones": None,
+            "room_label": r,
+        }
+        for r in all_rooms
+    }
 
     for fam in families:
         fam_label = fam.label if fam.label not in [None, "None"] else f"Famille {fam.id}"
+        persons = [f"{p.first_name} {p.last_name}" for p in fam.persons.order_by(Person.id.asc())]
         for r in (fam.room_number, fam.room_number2):
             r = clean_field(r)
             if not r:
                 continue
             occupied_rooms.add(r)
-            room_data[r] = {"occupied": True, "family": fam_label, "family_id": fam.id}
+            room_data[r] = {
+                "occupied": True,
+                "family": fam_label,
+                "family_id": fam.id,
+                "arrival_date": fam.arrival_date.isoformat() if fam.arrival_date else None,
+                "persons": persons,
+                "persons_count": len(persons),
+                "phones": phones_text(fam) or None,
+                "room_label": r,
+            }
 
     free_rooms = sorted(
         all_rooms - occupied_rooms,
