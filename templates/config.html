@@ -213,87 +213,34 @@
       </div>
     </div>
     <div class="tab-pane fade" id="disposition" role="tabpanel">
-      <style>
-        #layout-palette .layout-item {
-          cursor: grab;
-          padding: 4px 8px;
-          border: 1px solid var(--bs-border-color);
-          border-radius: 4px;
-          background: var(--bs-secondary-bg);
-          user-select: none;
-        }
-        #floor-container {
-          height: 500px;
-          background-image: linear-gradient(#eee 1px, transparent 1px), linear-gradient(90deg, #eee 1px, transparent 1px);
-          background-size: 10px 10px;
-          position: relative;
-        }
-        #layout-trash {
-          border: 2px dashed var(--bs-danger);
-          border-radius: 4px;
-          color: var(--bs-danger);
-          cursor: default;
-        }
-        #layout-trash.dragover {
-          background: var(--bs-danger-bg-subtle);
-        }
-      </style>
-      <p class="text-muted small mb-3">
-        La disposition est enregistrée avec la configuration.
-        Utilisez la sauvegarde de configuration pour exporter ou importer.
-      </p>
-      <div class="row g-3 mb-3">
-        <div class="col">
-          <label class="form-label">Largeur des cases</label>
-          <input type="number" class="form-control" id="cell_width" name="cell_width" value="{{ config.layout.cell_width or 80 }}">
-        </div>
-        <div class="col">
-          <label class="form-label">Hauteur des cases</label>
-          <input type="number" class="form-control" id="cell_height" name="cell_height" value="{{ config.layout.cell_height or 40 }}">
+      <div class="alert alert-info d-flex align-items-start" role="alert">
+        <i class="bi bi-cube me-2 fs-4"></i>
+        <div>
+          <div class="fw-bold">Nouvel éditeur de structure 3D</div>
+          <div class="small">Concevez et sauvegardez l'architecture directement depuis l'éditeur immersif.</div>
         </div>
       </div>
-      <div class="row g-3 mb-3">
-        <div class="col">
-          <label class="form-label">Espace horizontal</label>
-          <input type="number" class="form-control" name="col_gap" value="{{ config.layout.col_gap or 0 }}">
-        </div>
-        <div class="col">
-          <label class="form-label">Espace vertical</label>
-          <input type="number" class="form-control" name="row_gap" value="{{ config.layout.row_gap or 0 }}">
-        </div>
+      <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+        <a class="btn btn-primary" target="_blank" href="{{ url_for('layout_editor') }}">
+          <i class="bi bi-boxes me-1"></i> Ouvrir l'éditeur 3D
+        </a>
+        {% if config.layout3d.scene %}
+          <span class="badge text-bg-success">Structure enregistrée</span>
+          {% if config.layout3d.updated_at %}
+            <span class="text-secondary small">Dernière sauvegarde : {{ config.layout3d.updated_at }}</span>
+          {% endif %}
+        {% else %}
+          <span class="text-secondary small">Aucune structure sauvegardée pour le moment.</span>
+        {% endif %}
       </div>
-      <div class="d-flex gap-3">
-          <div class="flex-shrink-0">
-            <div id="layout-palette" class="d-flex flex-column gap-2 mb-3">
-              <div class="layout-item" draggable="true" data-type="room" data-label="Chambre">Chambre</div>
-              <div class="layout-item" draggable="true" data-type="edf" data-label="EDF">EDF</div>
-              <div class="layout-item" draggable="true" data-type="trash" data-label="Poubelles">Poubelles</div>
-              <div class="layout-item" draggable="true" data-type="stairs" data-label="Escalier">Escalier</div>
-              <div class="layout-item" draggable="true" data-type="workshop" data-label="Atelier">Atelier</div>
-              <div class="layout-item" draggable="true" data-type="laundry" data-label="Lingerie">Lingerie</div>
-              <div class="layout-item" draggable="true" data-type="storage" data-label="Réserve">Réserve</div>
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-floor">Ajouter un étage</button>
-            <div id="layout-trash" class="p-3 text-center">
-              <i class="bi bi-trash fs-3"></i>
-            </div>
-          </div>
-        <div class="flex-grow-1">
-          <div class="d-flex justify-content-between mb-2">
-            <ul class="nav nav-pills mb-0" id="floor-nav"></ul>
-            <div class="btn-group btn-group-sm">
-              <button type="button" class="btn btn-outline-secondary" id="zoom-in">
-                <i class="bi bi-zoom-in"></i>
-              </button>
-              <button type="button" class="btn btn-outline-secondary" id="zoom-out">
-                <i class="bi bi-zoom-out"></i>
-              </button>
-            </div>
-          </div>
-          <div id="floor-container" class="border"></div>
-        </div>
+      <p class="text-muted small">La structure se sauvegarde depuis l'éditeur via le bouton « Enregistrer dans FlexiLogis ». Cette section affiche un aperçu en lecture seule.</p>
+      {% if config.layout3d.scene %}
+      <div class="ratio ratio-16x9 border rounded shadow-sm">
+        <iframe title="Aperçu 3D" src="{{ url_for('layout_viewer') }}" class="rounded" style="background:#0f172a;"></iframe>
       </div>
-      <textarea name="layout_json" id="layout_json" hidden>{{ config.layout.floors|tojson }}</textarea>
+      {% else %}
+      <div class="alert alert-secondary">Créez une première structure dans l'éditeur pour voir l'aperçu ici.</div>
+      {% endif %}
     </div>
   </div>
   <button type="submit" class="btn btn-primary mt-3">Enregistrer</button>
@@ -301,6 +248,4 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
-<script src="{{ url_for('static', filename='js/layout.js') }}"></script>
 {% endblock %}
