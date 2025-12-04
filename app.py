@@ -110,6 +110,7 @@ DEFAULT_CONFIG = {
             "recent_families": {"order": 8, "width": 4},
         },
     },
+    "layout3d": {},
     "layout": {
         "floors": [],
     },
@@ -598,7 +599,7 @@ def dashboard():
         sex_chart_diameter=sex_chart_diameter,
         free_rooms=free_rooms,
         room_data=room_data,
-        layout=cfg.get("layout", {}),
+        layout3d=cfg.get("layout3d", {}),
         box_layout=box_layout,
         Person=Person,
     )
@@ -1065,6 +1066,36 @@ def config_import():
     return redirect(url_for("config"))
 
 
+@app.route("/layout-editor")
+def layout_editor():
+    cfg = load_config()
+    scene = cfg.get("layout3d", {}).get("scene") or {}
+    is_viewer = request.args.get("viewer") == "1"
+    return render_template("layout_editor.html", layout_state=scene, viewer=is_viewer)
+
+
+@app.route("/layout-viewer")
+def layout_viewer():
+    cfg = load_config()
+    scene = cfg.get("layout3d", {}).get("scene") or {}
+    return render_template("layout_editor.html", layout_state=scene, viewer=True)
+
+
+@app.route("/layout/save", methods=["POST"])
+def layout_save():
+    data = request.get_json(silent=True) or {}
+    scene = data.get("scene")
+    if not isinstance(scene, dict):
+        return {"status": "error", "message": "Données invalides"}, 400
+    cfg = load_config()
+    cfg["layout3d"] = {
+        "scene": scene,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    save_config(cfg)
+    return {"status": "ok"}
+
+
 
 @app.route("/config", methods=["GET", "POST"])
 def config():
@@ -1136,56 +1167,6 @@ def config():
                 width = 4
             box_layout[key] = {"order": order, "width": width}
         dashboard_cfg["layout"] = box_layout
-
-        layout = cfg.setdefault("layout", {})
-        layout_json = request.form.get("layout_json", "[]")
-        try:
-            layout["cell_width"] = int(request.form.get("cell_width", 80))
-        except ValueError:
-            layout["cell_width"] = 80
-        try:
-            layout["cell_height"] = int(request.form.get("cell_height", 40))
-        except ValueError:
-            layout["cell_height"] = 40
-        try:
-            layout["col_gap"] = int(request.form.get("col_gap", 0))
-        except ValueError:
-            layout["col_gap"] = 0
-        try:
-            layout["row_gap"] = int(request.form.get("row_gap", 0))
-        except ValueError:
-            layout["row_gap"] = 0
-        try:
-            floors_raw = json.loads(layout_json)
-        except json.JSONDecodeError:
-            floors_raw = []
-        floors: list[dict] = []
-        seen_names: set[str] = set()
-        cell_w = layout["cell_width"]
-        cell_h = layout["cell_height"]
-        for f in floors_raw:
-            if isinstance(f, str):
-                try:
-                    f = json.loads(f)
-                except json.JSONDecodeError:
-                    continue
-            if not isinstance(f, dict):
-                continue
-            name = (f.get("name") or "").strip()
-            key = name.lower()
-            if key in seen_names:
-                continue
-            seen_names.add(key)
-            stage_data = f.get("data")
-            rooms, width, height = extract_room_layout(stage_data, cell_w, cell_h)
-            floors.append({
-                "name": name,
-                "data": stage_data,
-                "rooms": rooms,
-                "width": width,
-                "height": height,
-            })
-        layout["floors"] = floors
 
         save_config(cfg)
         return redirect(url_for("config"))
