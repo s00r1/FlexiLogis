@@ -151,7 +151,7 @@
         }
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
-        body.viewer-mode > *:not(#canvas-container):not(#loader):not(script):not(style) {
+        body.viewer-mode > *:not(#canvas-container):not(#loader):not(#viewerOverlay):not(script):not(style) {
             display: none !important;
         }
         body.viewer-mode #loader { display: none !important; }
@@ -161,6 +161,60 @@
         }
         body.viewer-mode {
             overflow: hidden;
+        }
+
+        /* Viewer HUD */
+        #viewerOverlay {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 30;
+            padding: 16px;
+            display: flex;
+            gap: 12px;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        #viewerOverlay .viewer-panel {
+            pointer-events: auto;
+            min-width: 320px;
+            max-width: 420px;
+        }
+
+        .floor-chip {
+            border: 1px solid rgba(15,23,42,0.12);
+            background: white;
+            color: #0f172a;
+            font-weight: 700;
+            font-size: 11px;
+            padding: 6px 10px;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .floor-chip.active {
+            background: linear-gradient(135deg, #2563eb, #0ea5e9);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 10px 30px rgba(37,99,235,0.25);
+        }
+
+        .family-pill {
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-weight: 700;
+            font-size: 11px;
+            border: 1px solid #dbeafe;
+            padding: 4px 8px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
     </style>
 </head>
@@ -186,6 +240,50 @@
 
     <!-- Toast Container -->
     <div id="toast-container"></div>
+
+    <!-- Viewer overlay (only when intégré dans le dashboard) -->
+    <div id="viewerOverlay" class="hidden">
+        <div class="viewer-panel glass-panel rounded-2xl p-3 shadow-xl border border-white/60">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <div class="text-[10px] font-bold uppercase text-slate-500">Affichage de la structure</div>
+                    <div class="text-sm font-extrabold text-slate-900">Filtres d'étages</div>
+                    <div class="text-[11px] text-slate-600">Sélectionnez un ou plusieurs étages ou affichez tout.</div>
+                </div>
+                <button id="viewerAllFloorsBtn" class="family-pill"><i data-lucide="globe-2" size="14"></i> Toute la structure</button>
+            </div>
+            <div id="viewerFloorChips" class="flex flex-wrap gap-2 mt-3"></div>
+        </div>
+
+        <div id="familyCard" class="viewer-panel glass-panel rounded-2xl p-3 shadow-xl border border-white/60 hidden">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <div class="text-[10px] uppercase font-bold text-slate-500">Famille</div>
+                    <div id="familyCardName" class="text-lg font-extrabold text-slate-900">—</div>
+                    <div id="familyCardRoom" class="text-xs text-slate-500">Chambre —</div>
+                </div>
+                <button id="familyCardClose" class="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><i data-lucide="x" size="16"></i></button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-3 text-[12px] text-slate-600">
+                <div class="soft-card rounded-lg p-2">
+                    <div class="subtle-label">Arrivée</div>
+                    <div id="familyCardArrival" class="font-semibold text-slate-800">—</div>
+                </div>
+                <div class="soft-card rounded-lg p-2">
+                    <div class="subtle-label">Personnes</div>
+                    <div id="familyCardCount" class="font-semibold text-slate-800">—</div>
+                </div>
+            </div>
+            <div class="mt-3 text-[12px] text-slate-700">
+                <div class="subtle-label">Contact</div>
+                <div id="familyCardPhone" class="font-semibold">—</div>
+            </div>
+            <div class="mt-3">
+                <div class="subtle-label">Membres</div>
+                <ul id="familyCardMembers" class="list-disc list-inside text-[12px] text-slate-700"></ul>
+            </div>
+        </div>
+    </div>
 
     <!-- Command Ribbon -->
     <div class="absolute top-3 left-1/2 -translate-x-1/2 w-[720px] z-20">
@@ -1567,6 +1665,10 @@
                   this.breakerCableGroup = null;
                   this.roomStatus = window.ROOM_DATA || {};
                   this.familyUrlTemplate = window.FAMILY_URL_TEMPLATE || '';
+                  this.viewerSelectedFloors = new Set();
+                  this.viewerShowAllFloors = true;
+                  this.viewerOverlay = null;
+                  this.familyCardTimeout = null;
                   this.furnitureChoices = [
                       { value: 'crib', label: 'Lit bébé' },
                       { value: 'singleBed', label: 'Lit simple (1 personne)' },
@@ -2345,12 +2447,22 @@
                 if(!text) return;
                 const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 256;
                 const ctx = canvas.getContext('2d');
+                const subtext = (parent.userData.labelSubtext || '').toString().trim();
                 ctx.fillStyle = parent.userData.labelColor || CONFIG.defaultLabelColor;
                 ctx.beginPath(); ctx.roundRect(20, 20, 472, 216, 40); ctx.fill();
                 ctx.strokeStyle = 'white'; ctx.lineWidth = 10; ctx.stroke();
                 ctx.fillStyle = parent.userData.textColor || CONFIG.defaultTextColor;
-                ctx.font = 'bold 120px Inter, Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText(text, 256, 128);
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                if(subtext) {
+                    ctx.font = 'bold 110px Inter, Arial';
+                    ctx.fillText(text, 256, 110);
+                    ctx.font = '600 72px Inter, Arial';
+                    const truncated = subtext.length > 20 ? subtext.slice(0, 20) + '…' : subtext;
+                    ctx.fillText(truncated, 256, 190);
+                } else {
+                    ctx.font = 'bold 120px Inter, Arial';
+                    ctx.fillText(text, 256, 128);
+                }
                 const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false }));
                 sprite.name = 'Label';
                 const scale = parent.userData.labelScale || CONFIG.defaultLabelScale;
@@ -2390,6 +2502,7 @@
                     if(!obj.userData || obj.userData.type !== 'Chambre') return;
                     const status = this.getRoomStatus(obj);
                     const occupied = status?.occupied;
+                    obj.userData.labelSubtext = occupied && status?.family ? status.family : '';
                     const wallColor = occupied ? '#ef4444' : status ? '#22c55e' : '#94a3b8';
                     this.setRoomWallColor(obj, wallColor);
 
@@ -2413,6 +2526,110 @@
             buildFamilyUrl(familyId) {
                 if(!familyId || !this.familyUrlTemplate) return null;
                 return `${this.familyUrlTemplate}${familyId}`;
+            }
+
+            getAvailableFloors() {
+                const floors = new Set();
+                this.scene?.traverse(obj => { if(obj.userData?.type) floors.add(obj.userData.floor || 0); });
+                if(floors.size === 0) floors.add(0);
+                return Array.from(floors).sort((a,b) => a - b);
+            }
+
+            renderViewerFloorChips() {
+                if(!window.VIEW_MODE) return;
+                const container = document.getElementById('viewerFloorChips');
+                if(!container) return;
+                container.innerHTML = '';
+                const floors = this.getAvailableFloors();
+                if(this.viewerSelectedFloors.size === 0 && this.viewerShowAllFloors) {
+                    floors.forEach(f => this.viewerSelectedFloors.add(f));
+                }
+                floors.forEach(floor => {
+                    const btn = document.createElement('button');
+                    const active = this.viewerShowAllFloors || this.viewerSelectedFloors.has(floor);
+                    btn.className = `floor-chip ${active ? 'active' : ''}`;
+                    btn.dataset.floor = floor;
+                    btn.innerHTML = `<i data-lucide="layers" size="14"></i>${this.formatFloorLabel(floor)}`;
+                    btn.onclick = () => this.toggleViewerFloor(floor);
+                    container.appendChild(btn);
+                    lucide.createIcons({ root: btn });
+                });
+                const allBtn = document.getElementById('viewerAllFloorsBtn');
+                if(allBtn) {
+                    allBtn.classList.toggle('active', this.viewerShowAllFloors);
+                    lucide.createIcons({ root: allBtn });
+                }
+            }
+
+            toggleViewerFloor(floor) {
+                if(this.viewerShowAllFloors) {
+                    this.viewerShowAllFloors = false;
+                    this.viewerSelectedFloors.clear();
+                }
+                if(this.viewerSelectedFloors.has(floor)) this.viewerSelectedFloors.delete(floor);
+                else this.viewerSelectedFloors.add(floor);
+                if(this.viewerSelectedFloors.size === 0) this.viewerSelectedFloors.add(floor);
+                this.renderViewerFloorChips();
+                this.updateFloorVisibility();
+            }
+
+            setViewerShowAll(showAll = true) {
+                this.viewerShowAllFloors = showAll;
+                if(showAll) this.viewerSelectedFloors.clear();
+                else if(this.viewerSelectedFloors.size === 0) this.viewerSelectedFloors.add(this.floors.current || 0);
+                this.renderViewerFloorChips();
+                this.updateFloorVisibility();
+            }
+
+            initViewerOverlay() {
+                if(!window.VIEW_MODE) return;
+                const overlay = document.getElementById('viewerOverlay');
+                if(!overlay) return;
+                overlay.classList.remove('hidden');
+                this.viewerOverlay = overlay;
+                const allBtn = document.getElementById('viewerAllFloorsBtn');
+                if(allBtn) allBtn.onclick = () => this.setViewerShowAll(true);
+                const closeBtn = document.getElementById('familyCardClose');
+                if(closeBtn) closeBtn.onclick = () => this.hideFamilyCard();
+                this.renderViewerFloorChips();
+            }
+
+            formatViewerDate(iso) {
+                if(!iso) return '—';
+                const d = new Date(iso);
+                if(isNaN(d.getTime())) return '—';
+                return d.toLocaleDateString('fr-FR');
+            }
+
+            hideFamilyCard() {
+                const card = document.getElementById('familyCard');
+                if(card) card.classList.add('hidden');
+                if(this.familyCardTimeout) { clearTimeout(this.familyCardTimeout); this.familyCardTimeout = null; }
+            }
+
+            showFamilyCard(status, roomName = '') {
+                const card = document.getElementById('familyCard');
+                if(!card || !status) return;
+                card.classList.remove('hidden');
+                document.getElementById('familyCardName').textContent = status.family || 'Famille';
+                document.getElementById('familyCardRoom').textContent = roomName ? `Chambre ${roomName}` : `Chambre ${status.room_label || ''}`;
+                document.getElementById('familyCardArrival').textContent = this.formatViewerDate(status.arrival_date);
+                document.getElementById('familyCardCount').textContent = status.persons_count ? `${status.persons_count} pers.` : '—';
+                document.getElementById('familyCardPhone').textContent = status.phones || '—';
+                const list = document.getElementById('familyCardMembers');
+                if(list) {
+                    list.innerHTML = '';
+                    const members = status.persons || [];
+                    if(members.length === 0) list.innerHTML = '<li class="text-slate-400">—</li>';
+                    members.forEach(name => {
+                        const li = document.createElement('li');
+                        li.textContent = name;
+                        list.appendChild(li);
+                    });
+                }
+                lucide.createIcons({ root: card });
+                if(this.familyCardTimeout) clearTimeout(this.familyCardTimeout);
+                this.familyCardTimeout = setTimeout(() => this.hideFamilyCard(), 7000);
             }
 
             supportsDoorBadge(obj) {
@@ -2993,9 +3210,10 @@
                 if(window.VIEW_MODE && target?.userData?.type === 'Chambre') {
                     const status = this.getRoomStatus(target);
                     if(status?.occupied && status.family_id) {
-                        const url = this.buildFamilyUrl(status.family_id);
-                        if(url) window.open(url, '_blank');
+                        const roomLabel = target.userData.labelText || target.userData.name || '';
+                        this.showFamilyCard(status, roomLabel);
                     } else {
+                        this.hideFamilyCard();
                         this.showToast('Chambre libre', 'info');
                     }
                     return;
@@ -3124,12 +3342,19 @@
             }
 
             updateFloorVisibility() {
+                const viewerFilter = window.VIEW_MODE && this.isGlobalView;
+                const hasViewerSelection = viewerFilter && !this.viewerShowAllFloors && this.viewerSelectedFloors.size > 0;
                 this.scene.traverse(obj => {
                     if(obj.userData && obj.userData.type) {
                         const isCurrent = obj.userData.floor === this.floors.current;
-                        if(this.isGlobalView) { obj.visible = true; this.setOpacity(obj, 1); }
+                        const matchesViewer = hasViewerSelection ? this.viewerSelectedFloors.has(obj.userData.floor || 0) : true;
+                        if(this.isGlobalView) {
+                            obj.visible = matchesViewer;
+                            if(matchesViewer) this.setOpacity(obj, 1);
+                        }
                         else {
-                            if (obj.userData.floor > this.floors.current) obj.visible = false;
+                            if (!matchesViewer) { obj.visible = false; }
+                            else if (obj.userData.floor > this.floors.current) obj.visible = false;
                             else if (isCurrent) { obj.visible = true; this.setOpacity(obj, 1); }
                             else { obj.visible = true; this.setOpacity(obj, 0.1); }
                         }
@@ -3743,6 +3968,7 @@
                 let count = 0; let area = 0;
                 this.scene.traverse(obj => { if(obj.userData && obj.userData.type === 'Chambre') { count++; const base = obj.userData.baseSize || { x: 4, z: 6 }; area += (obj.scale.x * base.x) * (obj.scale.z * base.z); } });
                 document.getElementById('statRooms').innerText = count; document.getElementById('statArea').innerText = Math.round(area) + " m²";
+                if(window.VIEW_MODE) this.renderViewerFloorChips();
             }
 
             showToast(msg, type = 'success') {
@@ -3808,6 +4034,7 @@
         setTimeout(() => loader?.remove(), 300);
 
         if (window.VIEW_MODE) {
+            app.initViewerOverlay();
             document.body.classList.add('viewer-mode');
             app.selectionLocked = true;
             app.setGlobalView(true);
