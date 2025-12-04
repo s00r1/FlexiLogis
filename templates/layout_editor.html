@@ -170,6 +170,8 @@
       window.VIEW_MODE = {{ 'true' if viewer else 'false' }};
       window.INITIAL_SCENE = {{ layout_state|tojson }} || {};
       window.SAVE_ENDPOINT = "{{ url_for('layout_save') }}";
+      window.ROOM_DATA = {{ room_data|tojson }} || {};
+      window.FAMILY_URL_TEMPLATE = "{{ url_for('persons_list', fid=0)[:-1] }}";
     </script>
 
     <!-- Loader -->
@@ -1563,6 +1565,8 @@
                   this.multiSelectEnabled = false; this.multiSelection = new Set();
                   this.cablesVisible = true; this.cableMaterials = [];
                   this.breakerCableGroup = null;
+                  this.roomStatus = window.ROOM_DATA || {};
+                  this.familyUrlTemplate = window.FAMILY_URL_TEMPLATE || '';
                   this.furnitureChoices = [
                       { value: 'crib', label: 'Lit bébé' },
                       { value: 'singleBed', label: 'Lit simple (1 personne)' },
@@ -1839,6 +1843,7 @@
                 this.createBlock('room');
                 this.updateUI();
                 this.stateManager.snapshot(); this.updateStats();
+                this.applyRoomStatuses();
             }
 
             bindUI() {
@@ -2368,6 +2373,48 @@
                 if(obj.userData.doorLabelVisible === undefined) obj.userData.doorLabelVisible = true;
             }
 
+            getRoomStatus(room) {
+                if(!room || room.userData?.type !== 'Chambre') return null;
+                const label = (room.userData.labelText || room.userData.name || '').toString().trim();
+                if(!label) return null;
+                const normalized = label.replace(/^0+/, '') || label;
+                return this.roomStatus[label] || this.roomStatus[normalized] || null;
+            }
+
+            applyRoomStatuses() {
+                if(!window.VIEW_MODE) return;
+                const statusMap = this.roomStatus || {};
+                const hasData = Object.keys(statusMap).length > 0;
+
+                this.scene.traverse(obj => {
+                    if(!obj.userData || obj.userData.type !== 'Chambre') return;
+                    const status = this.getRoomStatus(obj);
+                    const occupied = status?.occupied;
+                    const wallColor = occupied ? '#ef4444' : status ? '#22c55e' : '#94a3b8';
+                    this.setRoomWallColor(obj, wallColor);
+
+                    const shell = obj.getObjectByName('RoomShell');
+                    const floorMesh = shell?.children?.find(c => c.userData?.isFloor);
+                    if(floorMesh?.material?.color) {
+                        const floorColor = occupied ? '#fecdd3' : status ? '#bbf7d0' : '#e2e8f0';
+                        floorMesh.material.color.set(floorColor);
+                    }
+
+                    if(status) {
+                        obj.userData.labelColor = occupied ? '#fee2e2' : '#dcfce7';
+                        obj.userData.textColor = occupied ? '#7f1d1d' : '#14532d';
+                        this.addLabel(obj, obj.userData.labelText);
+                    } else if(hasData) {
+                        this.addLabel(obj, obj.userData.labelText);
+                    }
+                });
+            }
+
+            buildFamilyUrl(familyId) {
+                if(!familyId || !this.familyUrlTemplate) return null;
+                return `${this.familyUrlTemplate}${familyId}`;
+            }
+
             supportsDoorBadge(obj) {
                 if(!obj || obj.userData?.isFurniture) return false;
                 const t = obj.userData.type;
@@ -2892,7 +2939,7 @@
 
             // --- EVENTS ---
             onPointerDown(event) {
-                if(this.isGlobalView) return;
+                if(this.isGlobalView && !window.VIEW_MODE) return;
                 const rect = this.renderer.domElement.getBoundingClientRect();
                 this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
                 this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -2910,7 +2957,8 @@
                     while(node && node.parent) {
                         if(node.userData && node.userData.isFurniture) {
                             let root = node; while(root.parent && root.parent !== this.scene) root = root.parent;
-                            if(root.userData.floor === this.floors.current) foundFurniture = node;
+                            const matchesFloor = window.VIEW_MODE || root.userData.floor === this.floors.current;
+                            if(matchesFloor) foundFurniture = node;
                             break;
                         }
                         node = node.parent;
@@ -2929,7 +2977,8 @@
                         let foundStructure = null;
                         while(node && node.parent) {
                             if(node.parent === this.scene && node.userData.type) {
-                                if(node.userData.floor === this.floors.current) foundStructure = node;
+                                const matchesFloor = window.VIEW_MODE || node.userData.floor === this.floors.current;
+                                if(matchesFloor) foundStructure = node;
                                 break;
                             }
                             node = node.parent;
@@ -2939,6 +2988,17 @@
                             break;
                         }
                     }
+                }
+
+                if(window.VIEW_MODE && target?.userData?.type === 'Chambre') {
+                    const status = this.getRoomStatus(target);
+                    if(status?.occupied && status.family_id) {
+                        const url = this.buildFamilyUrl(status.family_id);
+                        if(url) window.open(url, '_blank');
+                    } else {
+                        this.showToast('Chambre libre', 'info');
+                    }
+                    return;
                 }
 
                 if(this.selectionLocked && target !== this.selectedObject) return;
@@ -3642,6 +3702,7 @@
                       this.floors.current = savedCurrent;
                   });
                   this.updateFloorVisibility(); this.updateUI(); this.updateStats(); this.updateAllLabelVisibility();
+                  this.applyRoomStatuses();
                   this.updateBreakerCables();
                   this.updateSelectionChips();
               }
