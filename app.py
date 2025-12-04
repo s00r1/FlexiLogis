@@ -156,6 +156,34 @@ def generate_rooms(cfg: dict) -> list[str]:
     return [r for r in rooms if r not in exclude]
 
 
+def compute_room_status(cfg: dict, families: list[Family]) -> tuple[list[str], dict[str, dict]]:
+    """Calcule les informations d'occupation des chambres à partir de la configuration.
+
+    Retourne ``(free_rooms, room_data)`` où ``free_rooms`` est la liste triée des
+    chambres libres et ``room_data`` une table ``{room: {occupied, family, family_id}}``.
+    """
+
+    all_rooms = set(generate_rooms(cfg))
+    occupied_rooms: set[str] = set()
+    room_data = {r: {"occupied": False, "family": None, "family_id": None} for r in all_rooms}
+
+    for fam in families:
+        fam_label = fam.label if fam.label not in [None, "None"] else f"Famille {fam.id}"
+        for r in (fam.room_number, fam.room_number2):
+            r = clean_field(r)
+            if not r:
+                continue
+            occupied_rooms.add(r)
+            room_data[r] = {"occupied": True, "family": fam_label, "family_id": fam.id}
+
+    free_rooms = sorted(
+        all_rooms - occupied_rooms,
+        key=lambda x: int(x) if x.isdigit() else x,
+    )
+
+    return free_rooms, room_data
+
+
 def parse_groups(raw: str) -> list[dict]:
     groups: list[dict] = []
     for line in raw.splitlines():
@@ -490,26 +518,8 @@ def dashboard():
     recent_values = [days_since(f.arrival_date) for f in recent_families]
     recent_tenures = [tenure_text(f.arrival_date) for f in recent_families]
 
-    # Chambres libres
-    all_rooms = set(generate_rooms(cfg))
-    occupied_rooms: set[str] = set()
-    for f in families:
-        for r in (f.room_number, f.room_number2):
-            r = clean_field(r)
-            if r:
-                occupied_rooms.add(r)
-    free_rooms = sorted(
-        all_rooms - occupied_rooms,
-        key=lambda x: int(x) if x.isdigit() else x,
-    )
-
-    room_data = {r: {"occupied": False, "family": None, "family_id": None} for r in all_rooms}
-    for f in families:
-        fam_label = f.label if f.label not in [None, "None"] else f"Famille {f.id}"
-        for r in (f.room_number, f.room_number2):
-            r = clean_field(r)
-            if r:
-                room_data[r] = {"occupied": True, "family": fam_label, "family_id": f.id}
+    # Chambres libres et statut d'occupation
+    free_rooms, room_data = compute_room_status(cfg, families)
 
     # Alertes : sur-occupation, femmes isolées, bébés selon config
     overcrowded_rooms: list[dict] = []
@@ -1071,14 +1081,26 @@ def layout_editor():
     cfg = load_config()
     scene = cfg.get("layout3d", {}).get("scene") or {}
     is_viewer = request.args.get("viewer") == "1"
-    return render_template("layout_editor.html", layout_state=scene, viewer=is_viewer)
+    return render_template(
+        "layout_editor.html",
+        layout_state=scene,
+        viewer=is_viewer,
+        room_data={},
+    )
 
 
 @app.route("/layout-viewer")
 def layout_viewer():
     cfg = load_config()
     scene = cfg.get("layout3d", {}).get("scene") or {}
-    return render_template("layout_editor.html", layout_state=scene, viewer=True)
+    families = Family.query.filter(Family.departure_date.is_(None)).all()
+    _, room_data = compute_room_status(cfg, families)
+    return render_template(
+        "layout_editor.html",
+        layout_state=scene,
+        viewer=True,
+        room_data=room_data,
+    )
 
 
 @app.route("/layout/save", methods=["POST"])
